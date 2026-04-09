@@ -1,15 +1,25 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 
 const SECRET = process.env.AUTH_SECRET || "ranking-torneo-secret-key";
 
-function verifyToken(token) {
+async function verifyToken(token) {
   if (!token) return null;
   const [dataB64, sig] = token.split(".");
   if (!dataB64 || !sig) return null;
   try {
-    const data = Buffer.from(dataB64, "base64").toString();
-    const expected = crypto.createHmac("sha256", SECRET).update(data).digest("hex");
+    const data = atob(dataB64);
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(SECRET),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(data));
+    const expected = Array.from(new Uint8Array(signature))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
     if (sig !== expected) return null;
     const parsed = JSON.parse(data);
     if (parsed.exp < Date.now()) return null;
@@ -21,10 +31,8 @@ function verifyToken(token) {
 
 export async function middleware(request) {
   const token = request.cookies.get("session")?.value;
-  const user = verifyToken(token);
+  const user = await verifyToken(token);
 
-  // Solo proteger subrutas de /admin (ej: /admin/settings)
-  // /admin en sí muestra el LoginForm si no hay sesión (client-side guard)
   const isAdminSubroute =
     request.nextUrl.pathname.startsWith("/admin/") &&
     request.nextUrl.pathname !== "/admin";
@@ -40,6 +48,4 @@ export async function middleware(request) {
 
 export const config = {
   matcher: ["/admin/:path+"],
-  // :path+ requires 1+ segments — /admin itself is excluded (shows LoginForm)
-  // Only /admin/* subroutes are protected server-side
 };
