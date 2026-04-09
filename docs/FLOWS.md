@@ -1,6 +1,8 @@
 # Ranking del Torneo — Documentación de Flujos y Arquitectura
 
-> Generado el 2026-04-08. Proyecto: Next.js 14 + Supabase + Vercel.
+> Generado el 2026-04-08 desde el código fuente.
+> Archivos base: `app/page.jsx`, `app/admin/page.jsx`, `middleware.js`, `lib/supabase.js`, `supabase-schema.sql`
+> Proyecto: Next.js 14 + Supabase + Vercel.
 
 ---
 

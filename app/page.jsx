@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Trophy, Settings, RefreshCw, Share2, Download } from "lucide-react";
-import { supabase } from "../lib/supabase";
 import { buildScoreMap, computeRanking } from "../lib/ranking";
 
 export default function PublicRanking() {
@@ -21,20 +20,23 @@ export default function PublicRanking() {
     if (loadingRef.current) return;
     loadingRef.current = true;
     try {
-      const [p, d, s] = await Promise.all([
-        supabase.from("players").select("*").order("sort_order"),
-        supabase.from("dates").select("*").order("sort_order"),
-        supabase.from("scores").select("*"),
+      const [pRes, dRes, sRes] = await Promise.all([
+        fetch("/api/players"),
+        fetch("/api/dates"),
+        fetch("/api/scores"),
       ]);
-      if (p.error || d.error || s.error) {
+      if (!pRes.ok || !dRes.ok || !sRes.ok) {
         setError("No se pudieron cargar los datos");
         return;
       }
-      setPlayers(p.data || []);
-      setDates(d.data || []);
-      setScores(s.data || []);
+      const [p, d, s] = await Promise.all([pRes.json(), dRes.json(), sRes.json()]);
+      setPlayers(p || []);
+      setDates(d || []);
+      setScores(s || []);
       setError(null);
       setLoading(false);
+    } catch {
+      setError("No se pudieron cargar los datos");
     } finally {
       loadingRef.current = false;
     }
@@ -42,16 +44,8 @@ export default function PublicRanking() {
 
   useEffect(() => {
     load();
-    // Realtime subscriptions
-    const ch = supabase
-      .channel("public-ranking")
-      .on("postgres_changes", { event: "*", schema: "public", table: "players" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "dates" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "scores" }, load)
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const scoreMap = useMemo(() => buildScoreMap(scores), [scores]);

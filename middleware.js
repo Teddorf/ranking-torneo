@@ -1,34 +1,27 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
+import crypto from "crypto";
+
+const SECRET = process.env.AUTH_SECRET || "ranking-torneo-secret-key";
+
+function verifyToken(token) {
+  if (!token) return null;
+  const [dataB64, sig] = token.split(".");
+  if (!dataB64 || !sig) return null;
+  try {
+    const data = Buffer.from(dataB64, "base64").toString();
+    const expected = crypto.createHmac("sha256", SECRET).update(data).digest("hex");
+    if (sig !== expected) return null;
+    const parsed = JSON.parse(data);
+    if (parsed.exp < Date.now()) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 export async function middleware(request) {
-  let response = NextResponse.next({ request: { headers: request.headers } });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        get(name) {
-          return request.cookies.get(name)?.value;
-        },
-        set(name, value, options) {
-          request.cookies.set({ name, value, ...options });
-          response = NextResponse.next({ request: { headers: request.headers } });
-          response.cookies.set({ name, value, ...options });
-        },
-        remove(name, options) {
-          request.cookies.set({ name, value: "", ...options });
-          response = NextResponse.next({ request: { headers: request.headers } });
-          response.cookies.set({ name, value: "", ...options });
-        },
-      },
-    }
-  );
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const token = request.cookies.get("session")?.value;
+  const user = verifyToken(token);
 
   // Solo proteger subrutas de /admin (ej: /admin/settings)
   // /admin en sí muestra el LoginForm si no hay sesión (client-side guard)
@@ -42,7 +35,7 @@ export async function middleware(request) {
     return NextResponse.redirect(url);
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {

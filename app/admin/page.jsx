@@ -3,33 +3,36 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Trophy, Plus, Trash2, Calendar, Users, Save, LogOut, ArrowLeft, ChevronUp, ChevronDown, Pencil, Check, X } from "lucide-react";
-import { supabase } from "../../lib/supabase";
 import { buildScoreMap, computeRanking } from "../../lib/ranking";
 
 export default function AdminPage() {
-  const [session, setSession] = useState(null);
+  const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setChecking(false);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-    });
-    return () => sub.subscription.unsubscribe();
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        setUser(data);
+        setChecking(false);
+      })
+      .catch(() => setChecking(false));
   }, []);
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setUser(null);
+  };
 
   if (checking) {
     return <div className="min-h-screen flex items-center justify-center text-slate-400">Cargando…</div>;
   }
 
-  if (!session) return <LoginForm />;
-  return <AdminPanel onLogout={() => supabase.auth.signOut()} />;
+  if (!user) return <LoginForm onLogin={setUser} />;
+  return <AdminPanel onLogout={handleLogout} />;
 }
 
-function LoginForm() {
+function LoginForm({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
@@ -39,9 +42,23 @@ function LoginForm() {
     e.preventDefault();
     setErr("");
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (error) setErr(error.message);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErr(data.error || "Error al iniciar sesión");
+      } else {
+        onLogin(data);
+      }
+    } catch {
+      setErr("Error de red");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -100,19 +117,22 @@ function AdminPanel({ onLogout }) {
     if (loadingRef.current) return;
     loadingRef.current = true;
     try {
-      const [p, d, s] = await Promise.all([
-        supabase.from("players").select("*").order("sort_order"),
-        supabase.from("dates").select("*").order("sort_order"),
-        supabase.from("scores").select("*"),
+      const [pRes, dRes, sRes] = await Promise.all([
+        fetch("/api/players"),
+        fetch("/api/dates"),
+        fetch("/api/scores"),
       ]);
-      if (p.error || d.error || s.error) {
+      if (!pRes.ok || !dRes.ok || !sRes.ok) {
         setError("No se pudieron cargar los datos");
         return;
       }
-      setPlayers(p.data || []);
-      setDates(d.data || []);
-      setScores(s.data || []);
+      const [p, d, s] = await Promise.all([pRes.json(), dRes.json(), sRes.json()]);
+      setPlayers(p || []);
+      setDates(d || []);
+      setScores(s || []);
       setError(null);
+    } catch {
+      setError("No se pudieron cargar los datos");
     } finally {
       loadingRef.current = false;
     }
@@ -120,13 +140,8 @@ function AdminPanel({ onLogout }) {
 
   useEffect(() => {
     load();
-    const ch = supabase
-      .channel("admin-ranking")
-      .on("postgres_changes", { event: "*", schema: "public", table: "players" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "dates" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "scores" }, load)
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const flash = (msg, isError = false) => {
@@ -142,23 +157,41 @@ function AdminPanel({ onLogout }) {
     const name = newPlayer.trim();
     if (!name) return;
     const sort_order = (players[players.length - 1]?.sort_order || 0) + 1;
-    const { error } = await supabase.from("players").insert({ name, sort_order });
-    if (error) return flash("Error: " + error.message, true);
+    const res = await fetch("/api/players", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, sort_order }),
+    });
+    const data = await res.json();
+    if (!res.ok) return flash("Error: " + data.error, true);
     setNewPlayer("");
     flash("Jugador agregado");
+    load();
   };
 
   const removePlayer = async (id) => {
     if (!confirm("¿Eliminar jugador?")) return;
-    const { error } = await supabase.from("players").delete().eq("id", id);
-    if (error) return flash("Error: " + error.message, true);
+    const res = await fetch("/api/players", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data = await res.json();
+    if (!res.ok) return flash("Error: " + data.error, true);
     flash("Eliminado");
+    load();
   };
 
   const renamePlayer = async (id, name) => {
-    const { error } = await supabase.from("players").update({ name }).eq("id", id);
-    if (error) return flash("Error: " + error.message, true);
+    const res = await fetch("/api/players", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, name }),
+    });
+    const data = await res.json();
+    if (!res.ok) return flash("Error: " + data.error, true);
     flash("Renombrado");
+    load();
   };
 
   const movePlayer = async (id, direction) => {
@@ -166,34 +199,61 @@ function AdminPanel({ onLogout }) {
     const swapIdx = idx + direction;
     if (swapIdx < 0 || swapIdx >= players.length) return;
     const a = players[idx], b = players[swapIdx];
-    const { error } = await supabase.from("players").upsert([
-      { id: a.id, name: a.name, sort_order: b.sort_order },
-      { id: b.id, name: b.name, sort_order: a.sort_order },
+    // Intercambiar sort_order de los dos
+    await Promise.all([
+      fetch("/api/players", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: a.id, sort_order: b.sort_order }),
+      }),
+      fetch("/api/players", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: b.id, sort_order: a.sort_order }),
+      }),
     ]);
-    if (error) return flash("Error: " + error.message, true);
+    load();
   };
 
   const addDate = async (rawLabel, clearFn) => {
     const label = rawLabel.trim();
     if (!label) return;
     const sort_order = (dates[dates.length - 1]?.sort_order || 0) + 1;
-    const { error } = await supabase.from("dates").insert({ label, sort_order });
-    if (error) return flash("Error: " + error.message, true);
+    const res = await fetch("/api/dates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, sort_order }),
+    });
+    const data = await res.json();
+    if (!res.ok) return flash("Error: " + data.error, true);
     clearFn();
     flash("Fecha agregada");
+    load();
   };
 
   const removeDate = async (id) => {
     if (!confirm("¿Eliminar fecha?")) return;
-    const { error } = await supabase.from("dates").delete().eq("id", id);
-    if (error) return flash("Error: " + error.message, true);
+    const res = await fetch("/api/dates", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data = await res.json();
+    if (!res.ok) return flash("Error: " + data.error, true);
     flash("Eliminada");
+    load();
   };
 
   const renameDate = async (id, label) => {
-    const { error } = await supabase.from("dates").update({ label }).eq("id", id);
-    if (error) return flash("Error: " + error.message, true);
+    const res = await fetch("/api/dates", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, label }),
+    });
+    const data = await res.json();
+    if (!res.ok) return flash("Error: " + data.error, true);
     flash("Renombrada");
+    load();
   };
 
   const moveDate = async (id, direction) => {
@@ -201,33 +261,48 @@ function AdminPanel({ onLogout }) {
     const swapIdx = idx + direction;
     if (swapIdx < 0 || swapIdx >= dates.length) return;
     const a = dates[idx], b = dates[swapIdx];
-    const { error } = await supabase.from("dates").upsert([
-      { id: a.id, label: a.label, sort_order: b.sort_order },
-      { id: b.id, label: b.label, sort_order: a.sort_order },
+    await Promise.all([
+      fetch("/api/dates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: a.id, sort_order: b.sort_order }),
+      }),
+      fetch("/api/dates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: b.id, sort_order: a.sort_order }),
+      }),
     ]);
-    if (error) return flash("Error: " + error.message, true);
+    load();
   };
 
   const setScore = async (playerId, dateId, type, value) => {
     if (type === "none") {
-      const { error } = await supabase
-        .from("scores")
-        .delete()
-        .eq("player_id", playerId)
-        .eq("date_id", dateId);
-      if (error) return flash("Error: " + error.message, true);
-      return flash("Guardado");
+      const res = await fetch("/api/scores", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ player_id: playerId, date_id: dateId }),
+      });
+      const data = await res.json();
+      if (!res.ok) return flash("Error: " + data.error, true);
+      flash("Guardado");
+      load();
+      return;
     }
-    const row = {
-      player_id: playerId,
-      date_id: dateId,
-      type,
-      value: type === "points" ? Number(value) || 0 : 0,
-      updated_at: new Date().toISOString(),
-    };
-    const { error } = await supabase.from("scores").upsert(row, { onConflict: "player_id,date_id" });
-    if (error) return flash("Error: " + error.message, true);
+    const res = await fetch("/api/scores", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        player_id: playerId,
+        date_id: dateId,
+        type,
+        value: type === "points" ? Number(value) || 0 : 0,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return flash("Error: " + data.error, true);
     flash("Guardado");
+    load();
   };
 
   return (
