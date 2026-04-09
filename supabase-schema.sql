@@ -40,17 +40,27 @@ create policy "public read dates" on dates for select using (true);
 create policy "public read scores" on scores for select using (true);
 
 -- Políticas: escritura solo para usuarios autenticados (admin)
-create policy "auth write players" on players for all
-  using (auth.role() = 'authenticated')
-  with check (auth.role() = 'authenticated');
+-- Separadas por operación para evitar ambigüedad con la policy de lectura pública
+create policy "auth insert players" on players for insert
+  with check (auth.uid() is not null);
+create policy "auth update players" on players for update
+  using (auth.uid() is not null);
+create policy "auth delete players" on players for delete
+  using (auth.uid() is not null);
 
-create policy "auth write dates" on dates for all
-  using (auth.role() = 'authenticated')
-  with check (auth.role() = 'authenticated');
+create policy "auth insert dates" on dates for insert
+  with check (auth.uid() is not null);
+create policy "auth update dates" on dates for update
+  using (auth.uid() is not null);
+create policy "auth delete dates" on dates for delete
+  using (auth.uid() is not null);
 
-create policy "auth write scores" on scores for all
-  using (auth.role() = 'authenticated')
-  with check (auth.role() = 'authenticated');
+create policy "auth insert scores" on scores for insert
+  with check (auth.uid() is not null);
+create policy "auth update scores" on scores for update
+  using (auth.uid() is not null);
+create policy "auth delete scores" on scores for delete
+  using (auth.uid() is not null);
 
 -- Habilitar realtime para actualizaciones en vivo
 alter publication supabase_realtime add table players;
