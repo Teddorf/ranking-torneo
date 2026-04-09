@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Fondo amber redondeado -->
+  <rect width="512" height="512" rx="80" fill="#f59e0b"/>
+  <!-- Copa trofeo -->
+  <g transform="translate(256,256)">
+    <!-- Cuerpo de la copa -->
+    <path d="M-80,-120 Q-95,-27 0,27 Q95,-27 80,-120 Z" fill="#ffffff"/>
+    <!-- Brazos del trofeo -->
+    <path d="M-80,-107 Q-147,-107 -147,-53 Q-147,0 -93,0 Q-53,0 -40,27" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round"/>
+    <path d="M80,-107 Q147,-107 147,-53 Q147,0 93,0 Q53,0 40,27" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round"/>
+    <!-- Base del trofeo -->
+    <rect x="-27" y="27" width="54" height="58" fill="#ffffff"/>
+    <rect x="-74" y="85" width="148" height="24" rx="10" fill="#ffffff"/>
+    <!-- Estrella en la copa -->
+    <polygon points="0,-80 13,-48 48,-48 21,-27 32,5 0,-16 -32,5 -21,-27 -48,-48 -13,-48" fill="#f59e0b"/>
+  </g>
+</svg>

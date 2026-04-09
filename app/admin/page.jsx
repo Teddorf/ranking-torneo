@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Trophy, Plus, Trash2, Calendar, Users, Save, LogOut, ArrowLeft, ChevronUp, ChevronDown, Pencil, Check, X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
+import { buildScoreMap, computeRanking } from "../../lib/ranking";
 
 export default function AdminPage() {
   const [session, setSession] = useState(null);
@@ -89,18 +90,32 @@ function AdminPanel({ onLogout }) {
   const [scores, setScores] = useState([]);
   const [tab, setTab] = useState("scores");
   const [newPlayer, setNewPlayer] = useState("");
-  const [newDate, setNewDate] = useState("");
-  const [status, setStatus] = useState("");
+  const [newDateScores, setNewDateScores] = useState("");
+  const [newDateManage, setNewDateManage] = useState("");
+  const [status, setStatus] = useState({ msg: "", isError: false });
+  const [error, setError] = useState(null);
+  const loadingRef = useRef(false);
 
   const load = async () => {
-    const [p, d, s] = await Promise.all([
-      supabase.from("players").select("*").order("sort_order"),
-      supabase.from("dates").select("*").order("sort_order"),
-      supabase.from("scores").select("*"),
-    ]);
-    setPlayers(p.data || []);
-    setDates(d.data || []);
-    setScores(s.data || []);
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    try {
+      const [p, d, s] = await Promise.all([
+        supabase.from("players").select("*").order("sort_order"),
+        supabase.from("dates").select("*").order("sort_order"),
+        supabase.from("scores").select("*"),
+      ]);
+      if (p.error || d.error || s.error) {
+        setError("No se pudieron cargar los datos");
+        return;
+      }
+      setPlayers(p.data || []);
+      setDates(d.data || []);
+      setScores(s.data || []);
+      setError(null);
+    } finally {
+      loadingRef.current = false;
+    }
   };
 
   useEffect(() => {
@@ -114,38 +129,21 @@ function AdminPanel({ onLogout }) {
     return () => { supabase.removeChannel(ch); };
   }, []);
 
-  const flash = (msg) => {
-    setStatus(msg);
-    setTimeout(() => setStatus(""), 1500);
+  const flash = (msg, isError = false) => {
+    setStatus({ msg, isError });
+    if (!isError) setTimeout(() => setStatus({ msg: "", isError: false }), 2000);
   };
 
-  const scoreMap = useMemo(() => {
-    const m = {};
-    scores.forEach((s) => { m[`${s.player_id}_${s.date_id}`] = s; });
-    return m;
-  }, [scores]);
+  const scoreMap = useMemo(() => buildScoreMap(scores), [scores]);
 
-  const ranking = useMemo(() => {
-    return players
-      .map((p) => {
-        let total = 0, played = 0, byes = 0;
-        dates.forEach((d) => {
-          const s = scoreMap[`${p.id}_${d.id}`];
-          if (!s) return;
-          if (s.type === "points") { total += Number(s.value) || 0; played += 1; }
-          else if (s.type === "bye") { byes += 1; }
-        });
-        return { ...p, total, played, byes, avg: played ? total / played : 0 };
-      })
-      .sort((a, b) => b.total - a.total || b.avg - a.avg);
-  }, [players, dates, scoreMap]);
+  const ranking = useMemo(() => computeRanking(players, dates, scoreMap), [players, dates, scoreMap]);
 
   const addPlayer = async () => {
     const name = newPlayer.trim();
     if (!name) return;
     const sort_order = (players[players.length - 1]?.sort_order || 0) + 1;
     const { error } = await supabase.from("players").insert({ name, sort_order });
-    if (error) return flash("Error: " + error.message);
+    if (error) return flash("Error: " + error.message, true);
     setNewPlayer("");
     flash("Jugador agregado");
   };
@@ -153,13 +151,13 @@ function AdminPanel({ onLogout }) {
   const removePlayer = async (id) => {
     if (!confirm("¿Eliminar jugador?")) return;
     const { error } = await supabase.from("players").delete().eq("id", id);
-    if (error) return flash("Error: " + error.message);
+    if (error) return flash("Error: " + error.message, true);
     flash("Eliminado");
   };
 
   const renamePlayer = async (id, name) => {
     const { error } = await supabase.from("players").update({ name }).eq("id", id);
-    if (error) return flash("Error: " + error.message);
+    if (error) return flash("Error: " + error.message, true);
     flash("Renombrado");
   };
 
@@ -172,29 +170,29 @@ function AdminPanel({ onLogout }) {
       { id: a.id, name: a.name, sort_order: b.sort_order },
       { id: b.id, name: b.name, sort_order: a.sort_order },
     ]);
-    if (error) return flash("Error: " + error.message);
+    if (error) return flash("Error: " + error.message, true);
   };
 
-  const addDate = async () => {
-    const label = newDate.trim();
+  const addDate = async (rawLabel, clearFn) => {
+    const label = rawLabel.trim();
     if (!label) return;
     const sort_order = (dates[dates.length - 1]?.sort_order || 0) + 1;
     const { error } = await supabase.from("dates").insert({ label, sort_order });
-    if (error) return flash("Error: " + error.message);
-    setNewDate("");
+    if (error) return flash("Error: " + error.message, true);
+    clearFn();
     flash("Fecha agregada");
   };
 
   const removeDate = async (id) => {
     if (!confirm("¿Eliminar fecha?")) return;
     const { error } = await supabase.from("dates").delete().eq("id", id);
-    if (error) return flash("Error: " + error.message);
+    if (error) return flash("Error: " + error.message, true);
     flash("Eliminada");
   };
 
   const renameDate = async (id, label) => {
     const { error } = await supabase.from("dates").update({ label }).eq("id", id);
-    if (error) return flash("Error: " + error.message);
+    if (error) return flash("Error: " + error.message, true);
     flash("Renombrada");
   };
 
@@ -207,7 +205,7 @@ function AdminPanel({ onLogout }) {
       { id: a.id, label: a.label, sort_order: b.sort_order },
       { id: b.id, label: b.label, sort_order: a.sort_order },
     ]);
-    if (error) return flash("Error: " + error.message);
+    if (error) return flash("Error: " + error.message, true);
   };
 
   const setScore = async (playerId, dateId, type, value) => {
@@ -217,7 +215,7 @@ function AdminPanel({ onLogout }) {
         .delete()
         .eq("player_id", playerId)
         .eq("date_id", dateId);
-      if (error) return flash("Error: " + error.message);
+      if (error) return flash("Error: " + error.message, true);
       return flash("Guardado");
     }
     const row = {
@@ -228,7 +226,7 @@ function AdminPanel({ onLogout }) {
       updated_at: new Date().toISOString(),
     };
     const { error } = await supabase.from("scores").upsert(row, { onConflict: "player_id,date_id" });
-    if (error) return flash("Error: " + error.message);
+    if (error) return flash("Error: " + error.message, true);
     flash("Guardado");
   };
 
@@ -244,7 +242,11 @@ function AdminPanel({ onLogout }) {
             <h1 className="font-semibold text-lg">Admin</h1>
           </div>
           <div className="flex items-center gap-2">
-            {status && <span className="text-xs text-emerald-600">{status}</span>}
+            {status.msg && (
+              <span className={`text-xs ${status.isError ? "text-red-600" : "text-emerald-600"}`}>
+                {status.msg}
+              </span>
+            )}
             <button onClick={onLogout} className="p-2 rounded-lg hover:bg-slate-100" title="Salir">
               <LogOut className="w-4 h-4" />
             </button>
@@ -276,6 +278,17 @@ function AdminPanel({ onLogout }) {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-5">
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-4 flex items-center justify-between mb-4">
+            <span className="text-sm text-red-700">{error}</span>
+            <button
+              onClick={() => { setError(null); load(); }}
+              className="ml-4 px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
         {tab === "ranking" && (
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-200">
@@ -318,21 +331,22 @@ function AdminPanel({ onLogout }) {
               </div>
               <div className="flex gap-1">
                 <input
-                  value={newDate}
-                  onChange={(e) => setNewDate(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addDate()}
+                  value={newDateScores}
+                  onChange={(e) => setNewDateScores(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addDate(newDateScores, () => setNewDateScores(""))}
                   placeholder="Nueva fecha"
                   className="w-28 px-2 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
                 />
                 <button
-                  onClick={addDate}
+                  onClick={() => addDate(newDateScores, () => setNewDateScores(""))}
                   className="px-2 py-1.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
             </div>
-            <div className="overflow-x-auto">
+            <div className="table-scroll-container">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
@@ -355,7 +369,7 @@ function AdminPanel({ onLogout }) {
                     }, 0);
                     return (
                       <tr key={p.id} className="hover:bg-slate-50">
-                        <td className="px-3 py-2 sticky left-0 bg-white font-medium truncate max-w-[140px]">
+                        <td className="px-3 py-2 sticky left-0 z-[1] bg-white font-medium truncate max-w-[140px]">
                           {p.name}
                         </td>
                         <td className="px-2 py-2 text-right font-bold text-amber-600 tabular-nums">
@@ -377,6 +391,7 @@ function AdminPanel({ onLogout }) {
                   })}
                 </tbody>
               </table>
+            </div>
             </div>
           </div>
         )}
@@ -426,14 +441,14 @@ function AdminPanel({ onLogout }) {
               </div>
               <div className="p-3 flex gap-2 border-b border-slate-100">
                 <input
-                  value={newDate}
-                  onChange={(e) => setNewDate(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addDate()}
+                  value={newDateManage}
+                  onChange={(e) => setNewDateManage(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addDate(newDateManage, () => setNewDateManage(""))}
                   placeholder="Ej: 6-jun"
                   className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
                 />
                 <button
-                  onClick={addDate}
+                  onClick={() => addDate(newDateManage, () => setNewDateManage(""))}
                   className="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 flex items-center gap-1"
                 >
                   <Plus className="w-4 h-4" /> Agregar
@@ -477,16 +492,16 @@ function EditableRow({ value, onRename, onRemove, onMoveUp, onMoveDown }) {
         <button
           onClick={onMoveUp}
           disabled={!onMoveUp}
-          className="text-slate-400 hover:text-slate-700 disabled:opacity-20 disabled:cursor-not-allowed"
+          className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-20 disabled:cursor-not-allowed"
         >
-          <ChevronUp className="w-3.5 h-3.5" />
+          <ChevronUp className="w-4 h-4" />
         </button>
         <button
           onClick={onMoveDown}
           disabled={!onMoveDown}
-          className="text-slate-400 hover:text-slate-700 disabled:opacity-20 disabled:cursor-not-allowed"
+          className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-20 disabled:cursor-not-allowed"
         >
-          <ChevronDown className="w-3.5 h-3.5" />
+          <ChevronDown className="w-4 h-4" />
         </button>
       </div>
       {editing ? (
@@ -516,14 +531,14 @@ function EditableRow({ value, onRename, onRemove, onMoveUp, onMoveDown }) {
           <span className="flex-1 text-sm">{value}</span>
           <button
             onClick={() => setEditing(true)}
-            className="p-1.5 text-slate-400 hover:text-amber-600"
+            className="p-2.5 text-slate-400 hover:text-amber-600"
             title="Editar"
           >
             <Pencil className="w-4 h-4" />
           </button>
           <button
             onClick={onRemove}
-            className="p-1.5 text-slate-400 hover:text-red-500"
+            className="p-2.5 text-slate-400 hover:text-red-500"
             title="Eliminar"
           >
             <Trash2 className="w-4 h-4" />
@@ -537,6 +552,7 @@ function EditableRow({ value, onRename, onRemove, onMoveUp, onMoveDown }) {
 function ScoreCell({ score, onChange }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(score?.type === "points" ? String(score.value) : "");
+  const cancelRef = useRef(false);
 
   useEffect(() => {
     setVal(score?.type === "points" ? String(score.value) : "");
@@ -546,16 +562,23 @@ function ScoreCell({ score, onChange }) {
     return (
       <input
         autoFocus
-        type="number"
-        step="0.5"
+        type="text"
+        inputMode="decimal"
         value={val}
         onChange={(e) => setVal(e.target.value)}
-        onBlur={() => { onChange("points", val); setEditing(false); }}
+        onBlur={() => {
+          if (cancelRef.current) {
+            cancelRef.current = false;
+          } else {
+            onChange("points", val);
+          }
+          setEditing(false);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") { onChange("points", val); setEditing(false); }
-          if (e.key === "Escape") setEditing(false);
+          if (e.key === "Escape") { cancelRef.current = true; setEditing(false); }
         }}
-        className="w-14 px-1 py-1 text-sm border border-amber-400 rounded text-center"
+        className="w-16 px-1 py-1 text-sm border border-amber-400 rounded text-center"
       />
     );
   }
@@ -571,7 +594,7 @@ function ScoreCell({ score, onChange }) {
         </button>
         <button
           onClick={() => onChange("none")}
-          className="text-slate-300 hover:text-red-500 text-xs"
+          className="p-2 text-slate-300 hover:text-red-500 text-sm"
         >
           ×
         </button>

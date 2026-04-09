@@ -1,27 +1,43 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Trophy, Settings, RefreshCw } from "lucide-react";
+import { Trophy, Settings, RefreshCw, Share2, Download } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { buildScoreMap, computeRanking } from "../lib/ranking";
 
 export default function PublicRanking() {
   const [players, setPlayers] = useState([]);
   const [dates, setDates] = useState([]);
   const [scores, setScores] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [view, setView] = useState("ranking"); // ranking | tabla
+  const [sharing, setSharing] = useState(false);
+  const rankingRef = useRef(null);
+  const loadingRef = useRef(false);
 
   const load = async () => {
-    const [p, d, s] = await Promise.all([
-      supabase.from("players").select("*").order("sort_order"),
-      supabase.from("dates").select("*").order("sort_order"),
-      supabase.from("scores").select("*"),
-    ]);
-    setPlayers(p.data || []);
-    setDates(d.data || []);
-    setScores(s.data || []);
-    setLoading(false);
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    try {
+      const [p, d, s] = await Promise.all([
+        supabase.from("players").select("*").order("sort_order"),
+        supabase.from("dates").select("*").order("sort_order"),
+        supabase.from("scores").select("*"),
+      ]);
+      if (p.error || d.error || s.error) {
+        setError("No se pudieron cargar los datos");
+        return;
+      }
+      setPlayers(p.data || []);
+      setDates(d.data || []);
+      setScores(s.data || []);
+      setError(null);
+      setLoading(false);
+    } finally {
+      loadingRef.current = false;
+    }
   };
 
   useEffect(() => {
@@ -38,34 +54,47 @@ export default function PublicRanking() {
     };
   }, []);
 
-  const scoreMap = useMemo(() => {
-    const m = {};
-    scores.forEach((s) => {
-      m[`${s.player_id}_${s.date_id}`] = s;
-    });
-    return m;
-  }, [scores]);
+  const scoreMap = useMemo(() => buildScoreMap(scores), [scores]);
 
-  const ranking = useMemo(() => {
-    return players
-      .map((p) => {
-        let total = 0;
-        let played = 0;
-        let byes = 0;
-        dates.forEach((d) => {
-          const s = scoreMap[`${p.id}_${d.id}`];
-          if (!s) return;
-          if (s.type === "points") {
-            total += Number(s.value) || 0;
-            played += 1;
-          } else if (s.type === "bye") {
-            byes += 1;
-          }
+  const ranking = useMemo(() => computeRanking(players, dates, scoreMap), [players, dates, scoreMap]);
+
+  const handleShare = async () => {
+    if (!rankingRef.current || sharing) return;
+    setSharing(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(rankingRef.current, {
+        backgroundColor: "#f8fafc",
+        scale: 2,
+        useCORS: true,
+      });
+      const blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/png")
+      );
+      const file = new File([blob], "ranking-torneo.png", { type: "image/png" });
+      if (
+        navigator.share &&
+        navigator.canShare &&
+        navigator.canShare({ files: [file] })
+      ) {
+        await navigator.share({
+          title: "Ranking del Torneo",
+          files: [file],
         });
-        return { ...p, total, played, byes, avg: played ? total / played : 0 };
-      })
-      .sort((a, b) => b.total - a.total || b.avg - a.avg);
-  }, [players, dates, scoreMap]);
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "ranking-torneo.png";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error("Error al compartir:", err);
+    } finally {
+      setSharing(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -76,6 +105,14 @@ export default function PublicRanking() {
             <h1 className="font-semibold text-lg">Ranking del Torneo</h1>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              onClick={handleShare}
+              disabled={sharing}
+              className="p-2 rounded-lg hover:bg-slate-100 disabled:opacity-50"
+              title="Compartir ranking"
+            >
+              <Share2 className="w-4 h-4" />
+            </button>
             <button
               onClick={load}
               className="p-2 rounded-lg hover:bg-slate-100"
@@ -113,10 +150,20 @@ export default function PublicRanking() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 py-5">
-        {loading ? (
+        {error ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-4 flex items-center justify-between">
+            <span className="text-sm text-red-700">{error}</span>
+            <button
+              onClick={() => { setError(null); load(); }}
+              className="ml-4 px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+            >
+              Reintentar
+            </button>
+          </div>
+        ) : loading ? (
           <div className="text-center text-slate-400 py-10">Cargando…</div>
         ) : view === "ranking" ? (
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div ref={rankingRef} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="divide-y divide-slate-100">
               {ranking.map((p, i) => {
                 const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
@@ -150,7 +197,8 @@ export default function PublicRanking() {
             </div>
           </div>
         ) : (
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div ref={rankingRef} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="table-scroll-container">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
@@ -169,7 +217,7 @@ export default function PublicRanking() {
                 <tbody className="divide-y divide-slate-100">
                   {ranking.map((p) => (
                     <tr key={p.id}>
-                      <td className="px-3 py-2 sticky left-0 bg-white font-medium truncate max-w-[140px]">
+                      <td className="px-3 py-2 sticky left-0 z-[1] bg-white font-medium truncate max-w-[140px]">
                         {p.name}
                       </td>
                       <td className="px-2 py-2 text-right font-bold text-amber-600 tabular-nums">
@@ -191,6 +239,7 @@ export default function PublicRanking() {
                   ))}
                 </tbody>
               </table>
+            </div>
             </div>
           </div>
         )}

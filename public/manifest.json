@@ -1,0 +1,14 @@
+{
+  "name": "Ranking del Torneo",
+  "short_name": "Ranking",
+  "description": "Ranking en vivo del torneo de golf",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#f59e0b",
+  "icons": [
+    { "src": "/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" },
+    { "src": "/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml" },
+    { "src": "/icon-192.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
