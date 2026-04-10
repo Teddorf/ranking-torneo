@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Trophy, Settings, RefreshCw, Share2, Download } from "lucide-react";
-import { buildScoreMap, computeRanking } from "../lib/ranking";
+import { buildScoreMap, computeRanking, sortRows } from "../lib/ranking";
+import SearchInput from "../components/SearchInput";
+import SortableHeader from "../components/SortableHeader";
 
 export default function PublicRanking() {
   const [players, setPlayers] = useState([]);
@@ -13,6 +15,8 @@ export default function PublicRanking() {
   const [error, setError] = useState(null);
   const [view, setView] = useState("ranking"); // ranking | tabla
   const [sharing, setSharing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortConfig, setSortConfig] = useState({ column: "total", direction: "desc" });
   const rankingRef = useRef(null);
   const loadingRef = useRef(false);
 
@@ -51,6 +55,31 @@ export default function PublicRanking() {
   const scoreMap = useMemo(() => buildScoreMap(scores), [scores]);
 
   const ranking = useMemo(() => computeRanking(players, dates, scoreMap), [players, dates, scoreMap]);
+
+  const displayedRanking = useMemo(() => {
+    let filtered = ranking;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = ranking.filter((p) => p.name.toLowerCase().includes(q));
+    }
+    const isDefaultSort = sortConfig.column === "total" && sortConfig.direction === "desc";
+    if (!isDefaultSort) {
+      filtered = sortRows(filtered, sortConfig.column, sortConfig.direction, scoreMap);
+    }
+    return filtered;
+  }, [ranking, searchQuery, sortConfig, scoreMap]);
+
+  const isDefaultView = !searchQuery && sortConfig.column === "total" && sortConfig.direction === "desc";
+
+  const handleSort = (column) => {
+    setSortConfig((prev) => {
+      if (prev.column === column) {
+        if (prev.direction === "asc") return { column, direction: "desc" };
+        return { column: "total", direction: "desc" };
+      }
+      return { column, direction: "asc" };
+    });
+  };
 
   const handleShare = async () => {
     if (!rankingRef.current || sharing) return;
@@ -156,15 +185,22 @@ export default function PublicRanking() {
           </div>
         ) : loading ? (
           <div className="text-center text-slate-400 py-10">Cargando…</div>
-        ) : view === "ranking" ? (
+        ) : (
+          <>
+            <div className="mb-3">
+              <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Buscar jugador…" />
+            </div>
+            {view === "ranking" ? (
           <div ref={rankingRef} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="divide-y divide-slate-100">
-              {ranking.map((p, i) => {
-                const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
+              {displayedRanking.map((p, i) => {
+                const medal = isDefaultView
+                  ? i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null
+                  : null;
                 return (
                   <div key={p.id} className="flex items-center gap-3 px-4 py-3">
                     <div className="w-8 text-center font-semibold text-slate-500">
-                      {medal || i + 1}
+                      {isDefaultView ? (medal || i + 1) : "·"}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate">{p.name}</div>
@@ -183,9 +219,9 @@ export default function PublicRanking() {
                   </div>
                 );
               })}
-              {ranking.length === 0 && (
+              {displayedRanking.length === 0 && (
                 <div className="px-4 py-10 text-center text-slate-400 text-sm">
-                  Sin jugadores cargados todavía.
+                  {searchQuery ? "No se encontraron jugadores." : "Sin jugadores cargados todavía."}
                 </div>
               )}
             </div>
@@ -197,19 +233,15 @@ export default function PublicRanking() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium text-slate-600 sticky left-0 bg-slate-50 min-w-[140px]">
-                      Jugador
-                    </th>
-                    <th className="text-right px-2 py-2 font-medium text-amber-600">Total</th>
+                    <SortableHeader label="Jugador" columnKey="name" currentSort={sortConfig} onSort={handleSort} sticky />
+                    <SortableHeader label="Total" columnKey="total" currentSort={sortConfig} onSort={handleSort} align="right" className="text-amber-600" />
                     {dates.map((d) => (
-                      <th key={d.id} className="px-2 py-2 font-medium text-slate-600 min-w-[70px]">
-                        {d.label}
-                      </th>
+                      <SortableHeader key={d.id} label={d.label} columnKey={`date:${d.id}`} currentSort={sortConfig} onSort={handleSort} align="center" className="min-w-[70px]" />
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {ranking.map((p) => (
+                  {displayedRanking.map((p) => (
                     <tr key={p.id}>
                       <td className="px-3 py-2 sticky left-0 z-[1] bg-white font-medium truncate max-w-[140px]">
                         {p.name}
@@ -231,11 +263,20 @@ export default function PublicRanking() {
                       })}
                     </tr>
                   ))}
+                  {displayedRanking.length === 0 && (
+                    <tr>
+                      <td colSpan={2 + dates.length} className="px-4 py-10 text-center text-slate-400 text-sm">
+                        {searchQuery ? "No se encontraron jugadores." : "Sin jugadores cargados todavía."}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
             </div>
           </div>
+        )}
+          </>
         )}
         <p className="text-center text-xs text-slate-400 mt-4">
           Se actualiza en vivo automáticamente

@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Trophy, Plus, Trash2, Calendar, Users, Save, LogOut, ArrowLeft, ChevronUp, ChevronDown, Pencil, Check, X } from "lucide-react";
-import { buildScoreMap, computeRanking } from "../../lib/ranking";
+import { buildScoreMap, computeRanking, sortRows } from "../../lib/ranking";
+import SearchInput from "../../components/SearchInput";
+import SortableHeader from "../../components/SortableHeader";
 
 export default function AdminPage() {
   const [user, setUser] = useState(null);
@@ -111,6 +113,11 @@ function AdminPanel({ onLogout }) {
   const [newDateManage, setNewDateManage] = useState("");
   const [status, setStatus] = useState({ msg: "", isError: false });
   const [error, setError] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [rankingSortConfig, setRankingSortConfig] = useState({ column: "total", direction: "desc" });
+  const [scoresSortConfig, setScoresSortConfig] = useState({ column: "name", direction: "asc" });
+  const [managePlayerSearch, setManagePlayerSearch] = useState("");
+  const [manageDateSearch, setManageDateSearch] = useState("");
   const loadingRef = useRef(false);
 
   const load = async () => {
@@ -152,6 +159,78 @@ function AdminPanel({ onLogout }) {
   const scoreMap = useMemo(() => buildScoreMap(scores), [scores]);
 
   const ranking = useMemo(() => computeRanking(players, dates, scoreMap), [players, dates, scoreMap]);
+
+  const displayedRanking = useMemo(() => {
+    let filtered = ranking;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = ranking.filter((p) => p.name.toLowerCase().includes(q));
+    }
+    const isDefault = rankingSortConfig.column === "total" && rankingSortConfig.direction === "desc";
+    if (!isDefault) {
+      filtered = sortRows(filtered, rankingSortConfig.column, rankingSortConfig.direction, scoreMap);
+    }
+    return filtered;
+  }, [ranking, searchQuery, rankingSortConfig, scoreMap]);
+
+  const isDefaultRankingView = !searchQuery && rankingSortConfig.column === "total" && rankingSortConfig.direction === "desc";
+
+  const playersWithTotals = useMemo(() => {
+    return players.map((p) => {
+      let total = 0, played = 0, byes = 0;
+      dates.forEach((d) => {
+        const s = scoreMap[`${p.id}_${d.id}`];
+        if (s?.type === "points") { total += Number(s.value) || 0; played += 1; }
+        else if (s?.type === "bye") { byes += 1; }
+      });
+      return { ...p, total, played, byes, avg: played ? total / played : 0 };
+    });
+  }, [players, dates, scoreMap]);
+
+  const displayedScorePlayers = useMemo(() => {
+    let filtered = playersWithTotals;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter((p) => p.name.toLowerCase().includes(q));
+    }
+    const isDefault = scoresSortConfig.column === "name" && scoresSortConfig.direction === "asc";
+    if (!isDefault) {
+      filtered = sortRows(filtered, scoresSortConfig.column, scoresSortConfig.direction, scoreMap);
+    }
+    return filtered;
+  }, [playersWithTotals, searchQuery, scoresSortConfig, scoreMap]);
+
+  const filteredManagePlayers = useMemo(() => {
+    if (!managePlayerSearch) return players;
+    const q = managePlayerSearch.toLowerCase();
+    return players.filter((p) => p.name.toLowerCase().includes(q));
+  }, [players, managePlayerSearch]);
+
+  const filteredManageDates = useMemo(() => {
+    if (!manageDateSearch) return dates;
+    const q = manageDateSearch.toLowerCase();
+    return dates.filter((d) => d.label.toLowerCase().includes(q));
+  }, [dates, manageDateSearch]);
+
+  const handleRankingSort = (column) => {
+    setRankingSortConfig((prev) => {
+      if (prev.column === column) {
+        if (prev.direction === "asc") return { column, direction: "desc" };
+        return { column: "total", direction: "desc" };
+      }
+      return { column, direction: "asc" };
+    });
+  };
+
+  const handleScoresSort = (column) => {
+    setScoresSortConfig((prev) => {
+      if (prev.column === column) {
+        if (prev.direction === "asc") return { column, direction: "desc" };
+        return { column: "name", direction: "asc" };
+      }
+      return { column, direction: "asc" };
+    });
+  };
 
   const addPlayer = async () => {
     const name = newPlayer.trim();
@@ -364,18 +443,25 @@ function AdminPanel({ onLogout }) {
             </button>
           </div>
         )}
+        {(tab === "ranking" || tab === "scores") && (
+          <div className="mb-3">
+            <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Buscar jugador…" />
+          </div>
+        )}
         {tab === "ranking" && (
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-200">
               <h2 className="font-semibold">Clasificación general</h2>
             </div>
             <div className="divide-y divide-slate-100">
-              {ranking.map((p, i) => {
-                const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
+              {displayedRanking.map((p, i) => {
+                const medal = isDefaultRankingView
+                  ? i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null
+                  : null;
                 return (
                   <div key={p.id} className="flex items-center gap-3 px-4 py-3">
                     <div className="w-8 text-center font-semibold text-slate-500">
-                      {medal || i + 1}
+                      {isDefaultRankingView ? (medal || i + 1) : "·"}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate">{p.name}</div>
@@ -391,6 +477,11 @@ function AdminPanel({ onLogout }) {
                   </div>
                 );
               })}
+              {displayedRanking.length === 0 && (
+                <div className="px-4 py-10 text-center text-slate-400 text-sm">
+                  {searchQuery ? "No se encontraron jugadores." : "Sin jugadores cargados."}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -425,30 +516,22 @@ function AdminPanel({ onLogout }) {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium text-slate-600 sticky left-0 bg-slate-50 z-10 min-w-[140px]">
-                      Jugador
-                    </th>
-                    <th className="text-right px-2 py-2 font-medium text-amber-600">Total</th>
+                    <SortableHeader label="Jugador" columnKey="name" currentSort={scoresSortConfig} onSort={handleScoresSort} sticky />
+                    <SortableHeader label="Total" columnKey="total" currentSort={scoresSortConfig} onSort={handleScoresSort} align="right" className="text-amber-600" />
                     {dates.map((d) => (
-                      <th key={d.id} className="px-2 py-2 font-medium text-slate-600 min-w-[80px]">
-                        {d.label}
-                      </th>
+                      <SortableHeader key={d.id} label={d.label} columnKey={`date:${d.id}`} currentSort={scoresSortConfig} onSort={handleScoresSort} align="center" className="min-w-[80px]" />
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {players.map((p) => {
-                    const total = dates.reduce((acc, d) => {
-                      const s = scoreMap[`${p.id}_${d.id}`];
-                      return acc + (s?.type === "points" ? Number(s.value) || 0 : 0);
-                    }, 0);
+                  {displayedScorePlayers.map((p) => {
                     return (
                       <tr key={p.id} className="hover:bg-slate-50">
                         <td className="px-3 py-2 sticky left-0 z-[1] bg-white font-medium truncate max-w-[140px]">
                           {p.name}
                         </td>
                         <td className="px-2 py-2 text-right font-bold text-amber-600 tabular-nums">
-                          {total.toFixed(2).replace(/\.00$/, "")}
+                          {p.total.toFixed(2).replace(/\.00$/, "")}
                         </td>
                         {dates.map((d) => {
                           const s = scoreMap[`${p.id}_${d.id}`];
@@ -464,6 +547,13 @@ function AdminPanel({ onLogout }) {
                       </tr>
                     );
                   })}
+                  {displayedScorePlayers.length === 0 && (
+                    <tr>
+                      <td colSpan={2 + dates.length} className="px-4 py-10 text-center text-slate-400 text-sm">
+                        {searchQuery ? "No se encontraron jugadores." : "Sin jugadores cargados."}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -479,32 +569,40 @@ function AdminPanel({ onLogout }) {
                 <h2 className="font-semibold">Jugadores</h2>
                 <span className="text-xs text-slate-400 ml-auto">{players.length}</span>
               </div>
-              <div className="p-3 flex gap-2 border-b border-slate-100">
-                <input
-                  value={newPlayer}
-                  onChange={(e) => setNewPlayer(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addPlayer()}
-                  placeholder="Nombre del jugador"
-                  className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-                <button
-                  onClick={addPlayer}
-                  className="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 flex items-center gap-1"
-                >
-                  <Plus className="w-4 h-4" /> Agregar
-                </button>
+              <div className="p-3 space-y-2 border-b border-slate-100">
+                <div className="flex gap-2">
+                  <input
+                    value={newPlayer}
+                    onChange={(e) => setNewPlayer(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addPlayer()}
+                    placeholder="Nombre del jugador"
+                    className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                  <button
+                    onClick={addPlayer}
+                    className="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 flex items-center gap-1"
+                  >
+                    <Plus className="w-4 h-4" /> Agregar
+                  </button>
+                </div>
+                {players.length > 5 && (
+                  <SearchInput value={managePlayerSearch} onChange={setManagePlayerSearch} placeholder="Filtrar jugadores…" />
+                )}
               </div>
               <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
-                {players.map((p, i) => (
+                {filteredManagePlayers.map((p, i) => (
                   <EditableRow
                     key={p.id}
                     value={p.name}
                     onRename={(name) => renamePlayer(p.id, name)}
                     onRemove={() => removePlayer(p.id)}
-                    onMoveUp={i > 0 ? () => movePlayer(p.id, -1) : null}
-                    onMoveDown={i < players.length - 1 ? () => movePlayer(p.id, 1) : null}
+                    onMoveUp={!managePlayerSearch && i > 0 ? () => movePlayer(p.id, -1) : null}
+                    onMoveDown={!managePlayerSearch && i < players.length - 1 ? () => movePlayer(p.id, 1) : null}
                   />
                 ))}
+                {filteredManagePlayers.length === 0 && managePlayerSearch && (
+                  <div className="px-4 py-6 text-center text-slate-400 text-sm">No se encontraron jugadores.</div>
+                )}
               </div>
             </div>
 
@@ -514,32 +612,40 @@ function AdminPanel({ onLogout }) {
                 <h2 className="font-semibold">Fechas</h2>
                 <span className="text-xs text-slate-400 ml-auto">{dates.length}</span>
               </div>
-              <div className="p-3 flex gap-2 border-b border-slate-100">
-                <input
-                  value={newDateManage}
-                  onChange={(e) => setNewDateManage(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addDate(newDateManage, () => setNewDateManage(""))}
-                  placeholder="Ej: 6-jun"
-                  className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-                <button
-                  onClick={() => addDate(newDateManage, () => setNewDateManage(""))}
-                  className="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 flex items-center gap-1"
-                >
-                  <Plus className="w-4 h-4" /> Agregar
-                </button>
+              <div className="p-3 space-y-2 border-b border-slate-100">
+                <div className="flex gap-2">
+                  <input
+                    value={newDateManage}
+                    onChange={(e) => setNewDateManage(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addDate(newDateManage, () => setNewDateManage(""))}
+                    placeholder="Ej: 6-jun"
+                    className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                  <button
+                    onClick={() => addDate(newDateManage, () => setNewDateManage(""))}
+                    className="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 flex items-center gap-1"
+                  >
+                    <Plus className="w-4 h-4" /> Agregar
+                  </button>
+                </div>
+                {dates.length > 5 && (
+                  <SearchInput value={manageDateSearch} onChange={setManageDateSearch} placeholder="Filtrar fechas…" />
+                )}
               </div>
               <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
-                {dates.map((d, i) => (
+                {filteredManageDates.map((d, i) => (
                   <EditableRow
                     key={d.id}
                     value={d.label}
                     onRename={(label) => renameDate(d.id, label)}
                     onRemove={() => removeDate(d.id)}
-                    onMoveUp={i > 0 ? () => moveDate(d.id, -1) : null}
-                    onMoveDown={i < dates.length - 1 ? () => moveDate(d.id, 1) : null}
+                    onMoveUp={!manageDateSearch && i > 0 ? () => moveDate(d.id, -1) : null}
+                    onMoveDown={!manageDateSearch && i < dates.length - 1 ? () => moveDate(d.id, 1) : null}
                   />
                 ))}
+                {filteredManageDates.length === 0 && manageDateSearch && (
+                  <div className="px-4 py-6 text-center text-slate-400 text-sm">No se encontraron fechas.</div>
+                )}
               </div>
             </div>
           </div>
