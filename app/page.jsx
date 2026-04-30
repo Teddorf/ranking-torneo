@@ -197,10 +197,10 @@ export default function PublicRanking() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium text-slate-600 sticky left-0 bg-slate-50 min-w-[140px]">
+                    <th className="text-left px-3 py-2 font-medium text-slate-600 sticky left-0 bg-slate-50 z-[2] min-w-[140px]">
                       Jugador
                     </th>
-                    <th className="text-right px-2 py-2 font-medium text-amber-600">Total</th>
+                    <th className="text-right px-2 py-2 font-medium text-amber-600 sticky left-[140px] bg-slate-50 z-[1] border-r border-slate-200">Total</th>
                     {dates.map((d) => (
                       <th key={d.id} className="px-2 py-2 font-medium text-slate-600 min-w-[70px]">
                         {d.label}
@@ -211,10 +211,10 @@ export default function PublicRanking() {
                 <tbody className="divide-y divide-slate-100">
                   {ranking.map((p) => (
                     <tr key={p.id}>
-                      <td className="px-3 py-2 sticky left-0 z-[1] bg-white font-medium truncate max-w-[140px]">
+                      <td className="px-3 py-2 sticky left-0 z-[2] bg-white font-medium truncate max-w-[140px]">
                         {p.name}
                       </td>
-                      <td className="px-2 py-2 text-right font-bold text-amber-600 tabular-nums">
+                      <td className="px-2 py-2 text-right font-bold text-amber-600 tabular-nums sticky left-[140px] bg-white z-[1] border-r border-slate-200">
                         {p.total.toFixed(2).replace(/\.00$/, "")}
                       </td>
                       {dates.map((d) => {
