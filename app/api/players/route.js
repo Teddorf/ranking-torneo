@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { sql } from "../../../lib/db";
 import { getUser } from "../../../lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const players = await sql`SELECT * FROM players ORDER BY sort_order`;
